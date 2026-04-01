@@ -151,6 +151,7 @@ export default function AuctionNight({
 
   const handleBid = (increment) => {
     const amount = currentHighAmount + increment;
+    alert('Bid attempt: $' + amount);
     if (amount > myRemaining) return;
     placeBid(currentPlayer.id, amount);
   };
