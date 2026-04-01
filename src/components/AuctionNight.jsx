@@ -155,28 +155,22 @@ export default function AuctionNight({
     if (amount > myRemaining) return;
     
     const a = auction.auction;
-    alert('Auction ID: ' + (a?.id || 'NULL') + ' | Status: ' + (a?.status || 'NULL'));
-    
     if (!a || !a.id) return;
     
-    const { error } = await supabase
+    // Update last_bid_at FIRST to reset timer immediately
+    const now = new Date().toISOString();
+    await supabase
+      .from('auctions')
+      .update({ last_bid_at: now })
+      .eq('id', a.id);
+    // Then insert the bid
+    await supabase
       .from('bids')
       .insert({
         auction_id: a.id,
         player_id: currentPlayer.id,
         amount,
       });
-    
-    if (error) {
-      alert('Bid error: ' + error.message);
-    } else {
-      alert('Bid success!');
-      const now = new Date().toISOString();
-      await supabase
-        .from('auctions')
-        .update({ last_bid_at: now })
-        .eq('id', a.id);
-    }
   };
 
   const handleStartAuction = () => {
