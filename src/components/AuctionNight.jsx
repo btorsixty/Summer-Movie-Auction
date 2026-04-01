@@ -157,13 +157,14 @@ export default function AuctionNight({
     const a = auction.auction;
     if (!a || !a.id) return;
     
-    // Update last_bid_at FIRST to reset timer immediately
+    // Update last_bid_at FIRST to reset timer
     const now = new Date().toISOString();
     await supabase
       .from('auctions')
       .update({ last_bid_at: now })
       .eq('id', a.id);
-    // Then insert the bid
+    
+    // Insert the bid
     await supabase
       .from('bids')
       .insert({
@@ -171,6 +172,9 @@ export default function AuctionNight({
         player_id: currentPlayer.id,
         amount,
       });
+    
+    // Force refetch to update UI immediately (don't rely on realtime)
+    auction.refetch();
   };
 
   const handleStartAuction = () => {
