@@ -483,8 +483,10 @@ export default function AuctionNight({
                       <button
                         key={inc}
                         onClick={() => canAfford && handleBid(inc)}
+                        onTouchEnd={(e) => { e.preventDefault(); if (canAfford) handleBid(inc); }}
                         disabled={!canAfford}
                         style={{
+                          touchAction: 'manipulation',
                           padding: '14px 20px',
                           minWidth: 90,
                           background: canAfford
