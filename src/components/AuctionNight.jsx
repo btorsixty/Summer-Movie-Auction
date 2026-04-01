@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { supabase } from '../lib/supabase';
 import { STARTING_TIME, BID_EXTENSION, BID_INCREMENTS } from '../lib/constants';
 import { formatMoney } from '../lib/utils';
 
@@ -149,11 +150,33 @@ export default function AuctionNight({
   const currentHighAmount = currentHigh?.amount || 0;
   const isMyHighBid = currentHigh?.player_id === currentPlayer.id;
 
-  const handleBid = (increment) => {
+  const handleBid = async (increment) => {
     const amount = currentHighAmount + increment;
-    alert('Bid attempt: $' + amount);
     if (amount > myRemaining) return;
-    placeBid(currentPlayer.id, amount);
+    
+    const a = auction.auction;
+    alert('Auction ID: ' + (a?.id || 'NULL') + ' | Status: ' + (a?.status || 'NULL'));
+    
+    if (!a || !a.id) return;
+    
+    const { error } = await supabase
+      .from('bids')
+      .insert({
+        auction_id: a.id,
+        player_id: currentPlayer.id,
+        amount,
+      });
+    
+    if (error) {
+      alert('Bid error: ' + error.message);
+    } else {
+      alert('Bid success!');
+      const now = new Date().toISOString();
+      await supabase
+        .from('auctions')
+        .update({ last_bid_at: now })
+        .eq('id', a.id);
+    }
   };
 
   const handleStartAuction = () => {
