@@ -37,7 +37,7 @@ const AuctionTimer = ({ timeLeft, isActive, isFinished }) => {
         </div>
         {!isFinished && (
           <div style={{ fontSize: 10, color: '#6a5f55', textTransform: 'uppercase', letterSpacing: 2, marginTop: 4 }}>
-              {isActive ? (localAuction?.last_bid_at ? 'LB: ' + new Date(localAuction.last_bid_at).toLocaleTimeString() : 'NO LB') : 'ready'}
+              {isActive ? 'seconds' : 'ready'}
           </div>
         )}
       </div>
