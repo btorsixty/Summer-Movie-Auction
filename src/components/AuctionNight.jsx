@@ -205,6 +205,10 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
                 movie_id: a.movie_id,
                 player_id: winningBid.player_id,
                 bid_amount: winningBid.amount,
+              })
+              .select()
+              .then(function(res) {
+                if (res.error) console.error('Results insert failed:', res.error.message);
               });
             }
           });

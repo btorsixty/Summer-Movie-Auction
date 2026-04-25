@@ -212,6 +212,10 @@ export function useAuction(roomId, isHost) {
                   movie_id: currentAuction.movie_id,
                   player_id: winningBid.player_id,
                   bid_amount: winningBid.amount,
+                })
+                .select()
+                .then(({ error }) => {
+                  if (error) console.error('Results insert failed:', error.message);
                 });
             }
           });
