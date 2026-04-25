@@ -51,87 +51,80 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
   const [localAuction, setLocalAuction] = useState(null);
   const [timeLeft, setTimeLeft] = useState(STARTING_TIME);
   const [showSold, setShowSold] = useState(false);
+
   const pollRef = useRef(null);
   const timerRef = useRef(null);
+  const localAuctionRef = useRef(null);
+  const localBidsRef = useRef(null);
+  const hasEndedRef = useRef(false);
 
-  const {
-    auction: hookAuction,
-    startAuction, endEarly, resetAuction,
-  } = auction;
+  // Keep refs in sync with state at all times
+  useEffect(() => { localAuctionRef.current = localAuction; }, [localAuction]);
+  useEffect(() => { localBidsRef.current = localBids; }, [localBids]);
 
-  // Poll for auction state and bids every 500ms during active auction
+  const { startAuction, resetAuction } = auction;
+
+  // Poll for auction state and bids every 500ms
   useEffect(() => {
-    const activeAuction = localAuction || hookAuction;
-    if (!activeAuction || (activeAuction.status !== 'active' && activeAuction.status !== 'sold' && activeAuction.status !== 'no_sale')) {
-      // Try to find an active auction
-      if (room?.id) {
-        const checkForAuction = async () => {
-          const { data } = await supabase
-            .from('auctions')
-            .select('*, movies(title, release_date)')
-            .eq('room_id', room.id)
-            .in('status', ['active', 'sold', 'no_sale'])
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
-          if (data) {
-            setLocalAuction(data);
-          }
-        };
-        const iv = setInterval(checkForAuction, 1000);
-        checkForAuction();
-        return () => clearInterval(iv);
-      }
-      return;
-    }
+    if (!room?.id) return;
 
     const poll = async () => {
-      // Fetch latest auction state
+      // Find active or recently finished auction
       const { data: aData } = await supabase
         .from('auctions')
         .select('*, movies(title, release_date)')
-        .eq('id', activeAuction.id)
+        .eq('room_id', room.id)
+        .in('status', ['active', 'sold', 'no_sale'])
+        .order('created_at', { ascending: false })
+        .limit(1)
         .single();
 
       if (aData) {
-        setLocalAuction(aData);
+        const prevAuction = localAuctionRef.current;
 
-        if (aData.status === 'sold' && activeAuction.status === 'active') {
+        // Detect status change to sold
+        if (aData.status === 'sold' && prevAuction?.status === 'active') {
           setShowSold(true);
           setTimeout(() => setShowSold(false), 2500);
         }
-      }
 
-      // Fetch latest bids
-      const { data: bData } = await supabase
-        .from('bids')
-        .select('*, players(name, color)')
-        .eq('auction_id', activeAuction.id)
-        .order('created_at', { ascending: false });
+        setLocalAuction(aData);
 
-      if (bData) {
-        setLocalBids(bData);
+        // Fetch bids for this auction
+        const { data: bData } = await supabase
+          .from('bids')
+          .select('*, players(name, color)')
+          .eq('auction_id', aData.id)
+          .order('created_at', { ascending: false });
+
+        if (bData) {
+          setLocalBids(bData);
+        }
       }
     };
 
-    poll(); // Immediate
-    pollRef.current = setInterval(poll, 500); // Every 500ms
+    poll();
+    pollRef.current = setInterval(poll, 500);
 
     return () => clearInterval(pollRef.current);
-  }, [localAuction?.id, localAuction?.status, hookAuction?.id, room?.id]);
+  }, [room?.id]);
 
-  // Sync when hookAuction changes (e.g. host starts a new auction)
+  // Sync when host starts a new auction via the hook
   useEffect(() => {
-    if (hookAuction && (!localAuction || hookAuction.id !== localAuction.id)) {
+    const hookAuction = auction.auction;
+    if (hookAuction && (!localAuctionRef.current || hookAuction.id !== localAuctionRef.current.id)) {
       setLocalAuction(hookAuction);
       setLocalBids([]);
       setTimeLeft(STARTING_TIME);
       setShowSold(false);
+      hasEndedRef.current = false;
     }
-  }, [hookAuction?.id]);
+  }, [auction.auction?.id]);
 
-  // Timer computed from timestamps
+  // Timer — reads from refs to avoid stale closure
   useEffect(() => {
+    const a = localAuctionRef.current;
+
     if (!localAuction || localAuction.status !== 'active') {
       clearInterval(timerRef.current);
       if (localAuction?.status === 'sold' || localAuction?.status === 'no_sale') {
@@ -140,33 +133,39 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
       return;
     }
 
-    let hasEnded = false;
+    // Reset hasEnded when a new auction starts
+    hasEndedRef.current = false;
 
     const tick = () => {
-      if (!localAuction || localAuction.status !== 'active') return;
-      const lastEvent = localAuction.last_bid_at || localAuction.started_at;
+      const currentAuction = localAuctionRef.current;
+      if (!currentAuction || currentAuction.status !== 'active') return;
+
+      const lastEvent = currentAuction.last_bid_at || currentAuction.started_at;
       if (!lastEvent) return;
 
       const elapsed = (Date.now() - new Date(lastEvent).getTime()) / 1000;
       const remaining = Math.max(0, Math.ceil(STARTING_TIME - elapsed));
       setTimeLeft(remaining);
 
-      if (remaining <= -2 && !hasEnded && isHost) {
-        hasEnded = true;
+      // Host ends auction 2 seconds after timer shows 0
+      const rawRemaining = STARTING_TIME - elapsed;
+      if (rawRemaining <= -2 && !hasEndedRef.current && isHost) {
+        hasEndedRef.current = true;
         clearInterval(timerRef.current);
 
-        const finalStatus = localBids.length > 0 ? 'sold' : 'no_sale';
+        const currentBids = localBidsRef.current || [];
+        const finalStatus = currentBids.length > 0 ? 'sold' : 'no_sale';
 
         supabase
           .from('auctions')
           .update({ status: finalStatus, ended_at: new Date().toISOString() })
-          .eq('id', localAuction.id)
+          .eq('id', currentAuction.id)
           .then(() => {
-            if (finalStatus === 'sold' && localBids.length > 0) {
-              const winningBid = localBids[0];
+            if (finalStatus === 'sold' && currentBids.length > 0) {
+              const winningBid = currentBids[0];
               supabase.from('results').insert({
                 room_id: room.id,
-                movie_id: localAuction.movie_id,
+                movie_id: currentAuction.movie_id,
                 player_id: winningBid.player_id,
                 bid_amount: winningBid.amount,
               });
@@ -184,9 +183,9 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
     timerRef.current = setInterval(tick, 200);
 
     return () => clearInterval(timerRef.current);
-  }, [localAuction?.id, localAuction?.status, localAuction?.last_bid_at, localAuction?.started_at, isHost, room?.id]);
+  }, [localAuction?.id, localAuction?.status, isHost, room?.id]);
 
-  // Calculate each player's remaining budget
+  // Budget calculation
   const getRemaining = (playerId) => {
     const spent = results.filter(r => r.player_id === playerId && r.status === 'active')
       .reduce((s, r) => s + r.bid_amount, 0);
@@ -204,16 +203,16 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
 
   const isActive = localAuction?.status === 'active';
   const isFinished = localAuction?.status === 'sold' || localAuction?.status === 'no_sale';
-  const activeAuction = localAuction;
 
+  // Place a bid — goes directly to Supabase, then force refetch
   const handleBid = async (increment) => {
     const amount = currentHighAmount + increment;
     if (amount > myRemaining) return;
 
-    const a = localAuction;
+    const a = localAuctionRef.current;
     if (!a || !a.id || a.status !== 'active') return;
 
-    // Update last_bid_at FIRST to reset timer
+    // Update last_bid_at FIRST to reset timer for everyone
     const now = new Date().toISOString();
     await supabase
       .from('auctions')
@@ -229,44 +228,48 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
         amount,
       });
 
-    // Force immediate poll
-    const { data: bData } = await supabase
-      .from('bids')
-      .select('*, players(name, color)')
-      .eq('auction_id', a.id)
-      .order('created_at', { ascending: false });
-    if (bData) setLocalBids(bData);
-
+    // Immediate refetch so this device sees the update right away
     const { data: aData } = await supabase
       .from('auctions')
       .select('*, movies(title, release_date)')
       .eq('id', a.id)
       .single();
     if (aData) setLocalAuction(aData);
+
+    const { data: bData } = await supabase
+      .from('bids')
+      .select('*, players(name, color)')
+      .eq('auction_id', a.id)
+      .order('created_at', { ascending: false });
+    if (bData) setLocalBids(bData);
   };
 
   const handleStartAuction = () => {
     if (!selectedMovieId) return;
+    hasEndedRef.current = false;
     startAuction(selectedMovieId);
     setSelectedMovieId('');
   };
 
   const handleEndEarly = async () => {
-    if (!localAuction) return;
+    const a = localAuctionRef.current;
+    if (!a) return;
     clearInterval(timerRef.current);
+    hasEndedRef.current = true;
 
-    const finalStatus = localBids.length > 0 ? 'sold' : 'no_sale';
+    const currentBids = localBidsRef.current || [];
+    const finalStatus = currentBids.length > 0 ? 'sold' : 'no_sale';
 
     await supabase
       .from('auctions')
       .update({ status: finalStatus, ended_at: new Date().toISOString() })
-      .eq('id', localAuction.id);
+      .eq('id', a.id);
 
-    if (finalStatus === 'sold' && localBids.length > 0) {
-      const winningBid = localBids[0];
+    if (finalStatus === 'sold' && currentBids.length > 0) {
+      const winningBid = currentBids[0];
       await supabase.from('results').insert({
         room_id: room.id,
-        movie_id: localAuction.movie_id,
+        movie_id: a.movie_id,
         player_id: winningBid.player_id,
         bid_amount: winningBid.amount,
       });
@@ -283,6 +286,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
     setLocalBids([]);
     setTimeLeft(STARTING_TIME);
     setShowSold(false);
+    hasEndedRef.current = false;
     resetAuction();
   };
 
@@ -311,7 +315,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
               color: '#fff', marginTop: 10, textAlign: 'center', padding: '0 20px',
               animation: 'soldBounce 0.6s ease-out 0.2s both',
             }}>
-              {(activeAuction?.movies?.title || 'Movie') + ' \u2192 '}
+              {(localAuction?.movies?.title || 'Movie') + ' \u2192 '}
               <span style={{ color: currentHighPlayer?.color }}>{currentHighPlayer?.name}</span>
               {' for '}
               <span style={{ color: '#c9a227' }}>{'$' + currentHigh.amount}</span>
@@ -354,7 +358,9 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
                     ))}
                   </select>
                   <button onClick={handleStartAuction} disabled={!selectedMovieId}
+                    onTouchEnd={(e) => { e.preventDefault(); if (selectedMovieId) handleStartAuction(); }}
                     style={{
+                      touchAction: 'manipulation',
                       width: '100%', padding: '14px',
                       background: selectedMovieId ? 'linear-gradient(135deg, #c9a227, #f4d03f)' : '#2a1f15',
                       border: 'none', borderRadius: 8,
@@ -381,7 +387,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
       )}
 
       {/* Active auction / finished state */}
-      {(isActive || isFinished) && activeAuction && (
+      {(isActive || isFinished) && localAuction && (
         <div style={{
           background: 'linear-gradient(135deg, #1a1410, #0d0a07)',
           border: '2px solid ' + (isFinished ? '#2a9d8f' : timeLeft <= 3 ? '#ff1744' : '#c9a227'),
@@ -396,11 +402,11 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
               fontFamily: 'var(--font-display)', fontSize: 'clamp(24px, 5vw, 40px)',
               fontWeight: 900, color: '#fff', marginTop: 6,
             }}>
-              {activeAuction.movies?.title}
+              {localAuction.movies?.title}
             </div>
-            {activeAuction.movies?.release_date && (
+            {localAuction.movies?.release_date && (
               <div style={{ fontSize: 12, color: '#8a7f75', marginTop: 4 }}>
-                {'Releasing ' + new Date(activeAuction.movies.release_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                {'Releasing ' + new Date(localAuction.movies.release_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
               </div>
             )}
           </div>
@@ -485,12 +491,14 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
           {/* Host controls */}
           {isHost && isActive && (
             <div style={{ textAlign: 'center', marginTop: 8 }}>
-              <button onClick={handleEndEarly} style={{
-                touchAction: 'manipulation',
-                padding: '8px 24px', background: 'transparent',
-                border: '1px solid #3a3025', borderRadius: 6, cursor: 'pointer',
-                fontSize: 12, color: '#6a5f55', letterSpacing: 2,
-              }}>
+              <button onClick={handleEndEarly}
+                onTouchEnd={(e) => { e.preventDefault(); handleEndEarly(); }}
+                style={{
+                  touchAction: 'manipulation',
+                  padding: '8px 24px', background: 'transparent',
+                  border: '1px solid #3a3025', borderRadius: 6, cursor: 'pointer',
+                  fontSize: 12, color: '#6a5f55', letterSpacing: 2,
+                }}>
                 END BIDDING EARLY
               </button>
             </div>
@@ -499,13 +507,15 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
           {isFinished && (
             <div style={{ textAlign: 'center', marginTop: 12 }}>
               {isHost ? (
-                <button onClick={handleReset} style={{
-                  touchAction: 'manipulation',
-                  padding: '12px 28px', background: 'linear-gradient(135deg, #2a9d8f, #3dccbb)',
-                  border: 'none', borderRadius: 8, cursor: 'pointer',
-                  fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700,
-                  color: '#0d0a07', letterSpacing: 2,
-                }}>
+                <button onClick={handleReset}
+                  onTouchEnd={(e) => { e.preventDefault(); handleReset(); }}
+                  style={{
+                    touchAction: 'manipulation',
+                    padding: '12px 28px', background: 'linear-gradient(135deg, #2a9d8f, #3dccbb)',
+                    border: 'none', borderRadius: 8, cursor: 'pointer',
+                    fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700,
+                    color: '#0d0a07', letterSpacing: 2,
+                  }}>
                   NEXT MOVIE
                 </button>
               ) : (
@@ -520,7 +530,6 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
 
       {/* Bid history + Budgets */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        {/* Bid History - visible to ALL players */}
         <div style={{
           background: 'linear-gradient(135deg, #1a1410, #0d0a07)',
           border: '1px solid #2a1f15', borderRadius: 12, overflow: 'hidden',
@@ -540,7 +549,6 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
                 display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px',
                 borderBottom: '1px solid #1a1410',
                 background: i === 0 ? (bid.players?.color || '#555') + '10' : 'transparent',
-                animation: i === 0 ? 'bidSlide 0.3s ease-out' : 'none',
               }}>
                 <div style={{ width: 4, height: 24, borderRadius: 2, background: bid.players?.color || '#555', flexShrink: 0 }} />
                 <div style={{ flex: 1, fontWeight: 700, color: bid.players?.color || '#fff', fontSize: 14 }}>
@@ -557,7 +565,6 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
           </div>
         </div>
 
-        {/* Budgets */}
         <div style={{
           background: 'linear-gradient(135deg, #1a1410, #0d0a07)',
           border: '1px solid #2a1f15', borderRadius: 12, overflow: 'hidden',
