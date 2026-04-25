@@ -51,6 +51,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
   const [localAuction, setLocalAuction] = useState(null);
   const [timeLeft, setTimeLeft] = useState(STARTING_TIME);
   const [showSold, setShowSold] = useState(false);
+  const [dismissedAuctionId, setDismissedAuctionId] = useState(null);
 
   const pollRef = useRef(null);
   const timerRef = useRef(null);
@@ -58,18 +59,16 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
   const localBidsRef = useRef(null);
   const hasEndedRef = useRef(false);
 
-  // Keep refs in sync with state at all times
   useEffect(() => { localAuctionRef.current = localAuction; }, [localAuction]);
   useEffect(() => { localBidsRef.current = localBids; }, [localBids]);
 
   const { startAuction, resetAuction } = auction;
 
-  // Poll for auction state and bids every 500ms
+  // Poll for auction state and bids
   useEffect(() => {
     if (!room?.id) return;
 
     const poll = async () => {
-      // Find active or recently finished auction
       const { data: aData } = await supabase
         .from('auctions')
         .select('*, movies(title, release_date)')
@@ -80,9 +79,18 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
         .single();
 
       if (aData) {
+        // Don't restore a dismissed auction
+        if (aData.id === dismissedAuctionId && aData.status !== 'active') {
+          return;
+        }
+
+        // If a NEW active auction appears, clear the dismissed ID
+        if (aData.status === 'active' && aData.id !== dismissedAuctionId) {
+          setDismissedAuctionId(null);
+        }
+
         const prevAuction = localAuctionRef.current;
 
-        // Detect status change to sold
         if (aData.status === 'sold' && prevAuction?.status === 'active') {
           setShowSold(true);
           setTimeout(() => setShowSold(false), 2500);
@@ -90,7 +98,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
 
         setLocalAuction(aData);
 
-        // Fetch bids for this auction
+        // Fetch bids
         const { data: bData } = await supabase
           .from('bids')
           .select('*, players(name, color)')
@@ -104,12 +112,12 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
     };
 
     poll();
-    pollRef.current = setInterval(poll, 500);
+    pollRef.current = setInterval(poll, 800);
 
     return () => clearInterval(pollRef.current);
-  }, [room?.id]);
+  }, [room?.id, dismissedAuctionId]);
 
-  // Sync when host starts a new auction via the hook
+  // Sync when host starts a new auction
   useEffect(() => {
     const hookAuction = auction.auction;
     if (hookAuction && (!localAuctionRef.current || hookAuction.id !== localAuctionRef.current.id)) {
@@ -118,13 +126,12 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
       setTimeLeft(STARTING_TIME);
       setShowSold(false);
       hasEndedRef.current = false;
+      setDismissedAuctionId(null);
     }
   }, [auction.auction?.id]);
 
-  // Timer — reads from refs to avoid stale closure
+  // Timer — uses refs, calculates from last_bid_at
   useEffect(() => {
-    const a = localAuctionRef.current;
-
     if (!localAuction || localAuction.status !== 'active') {
       clearInterval(timerRef.current);
       if (localAuction?.status === 'sold' || localAuction?.status === 'no_sale') {
@@ -133,7 +140,6 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
       return;
     }
 
-    // Reset hasEnded when a new auction starts
     hasEndedRef.current = false;
 
     const tick = () => {
@@ -143,13 +149,13 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
       const lastEvent = currentAuction.last_bid_at || currentAuction.started_at;
       if (!lastEvent) return;
 
-      const elapsed = (Date.now() - new Date(lastEvent).getTime()) / 1000;
-      const remaining = Math.max(0, Math.ceil(STARTING_TIME - elapsed));
+      const elapsedMs = Date.now() - new Date(lastEvent).getTime();
+      const elapsedSec = elapsedMs / 1000;
+      const remaining = Math.max(0, Math.ceil(STARTING_TIME - elapsedSec));
       setTimeLeft(remaining);
 
-      // Host ends auction 2 seconds after timer shows 0
-      const rawRemaining = STARTING_TIME - elapsed;
-      if (rawRemaining <= -2 && !hasEndedRef.current && isHost) {
+      // Host ends auction 3 seconds after timer display shows 0
+      if (elapsedSec >= STARTING_TIME + 3 && !hasEndedRef.current && isHost) {
         hasEndedRef.current = true;
         clearInterval(timerRef.current);
 
@@ -160,6 +166,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
           .from('auctions')
           .update({ status: finalStatus, ended_at: new Date().toISOString() })
           .eq('id', currentAuction.id)
+          .eq('status', 'active') // Only end if still active (prevents double-end)
           .then(() => {
             if (finalStatus === 'sold' && currentBids.length > 0) {
               const winningBid = currentBids[0];
@@ -180,7 +187,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
     };
 
     tick();
-    timerRef.current = setInterval(tick, 200);
+    timerRef.current = setInterval(tick, 250);
 
     return () => clearInterval(timerRef.current);
   }, [localAuction?.id, localAuction?.status, isHost, room?.id]);
@@ -204,7 +211,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
   const isActive = localAuction?.status === 'active';
   const isFinished = localAuction?.status === 'sold' || localAuction?.status === 'no_sale';
 
-  // Place a bid — goes directly to Supabase, then force refetch
+  // Place a bid
   const handleBid = async (increment) => {
     const amount = currentHighAmount + increment;
     if (amount > myRemaining) return;
@@ -212,41 +219,33 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
     const a = localAuctionRef.current;
     if (!a || !a.id || a.status !== 'active') return;
 
-    // Update last_bid_at FIRST to reset timer for everyone
+    // Update timer FIRST
     const now = new Date().toISOString();
-    await supabase
-      .from('auctions')
-      .update({ last_bid_at: now })
-      .eq('id', a.id);
 
-    // Insert the bid
-    await supabase
-      .from('bids')
-      .insert({
+    // Do both operations in parallel for speed
+    await Promise.all([
+      supabase.from('auctions').update({ last_bid_at: now }).eq('id', a.id),
+      supabase.from('bids').insert({
         auction_id: a.id,
         player_id: currentPlayer.id,
         amount,
-      });
+      }),
+    ]);
 
-    // Immediate refetch so this device sees the update right away
-    const { data: aData } = await supabase
-      .from('auctions')
-      .select('*, movies(title, release_date)')
-      .eq('id', a.id)
-      .single();
-    if (aData) setLocalAuction(aData);
+    // Immediate refetch
+    const [aRes, bRes] = await Promise.all([
+      supabase.from('auctions').select('*, movies(title, release_date)').eq('id', a.id).single(),
+      supabase.from('bids').select('*, players(name, color)').eq('auction_id', a.id).order('created_at', { ascending: false }),
+    ]);
 
-    const { data: bData } = await supabase
-      .from('bids')
-      .select('*, players(name, color)')
-      .eq('auction_id', a.id)
-      .order('created_at', { ascending: false });
-    if (bData) setLocalBids(bData);
+    if (aRes.data) setLocalAuction(aRes.data);
+    if (bRes.data) setLocalBids(bRes.data);
   };
 
   const handleStartAuction = () => {
     if (!selectedMovieId) return;
     hasEndedRef.current = false;
+    setDismissedAuctionId(null);
     startAuction(selectedMovieId);
     setSelectedMovieId('');
   };
@@ -282,6 +281,10 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
   };
 
   const handleReset = () => {
+    // Remember this auction ID so polling doesn't restore it
+    if (localAuction) {
+      setDismissedAuctionId(localAuction.id);
+    }
     setLocalAuction(null);
     setLocalBids([]);
     setTimeLeft(STARTING_TIME);
@@ -293,7 +296,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
   return (
     <div style={{ paddingTop: 20, maxWidth: 800, margin: '0 auto' }}>
 
-      {/* SOLD flash overlay */}
+      {/* SOLD flash */}
       {showSold && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -324,7 +327,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
         </div>
       )}
 
-      {/* Pre-auction: Host selects movie */}
+      {/* Pre-auction */}
       {!isActive && !isFinished && (
         <div style={{
           background: 'linear-gradient(135deg, #1a1410, #2a1f15)',
@@ -386,7 +389,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
         </div>
       )}
 
-      {/* Active auction / finished state */}
+      {/* Active / finished auction */}
       {(isActive || isFinished) && localAuction && (
         <div style={{
           background: 'linear-gradient(135deg, #1a1410, #0d0a07)',
@@ -488,7 +491,6 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
             </div>
           )}
 
-          {/* Host controls */}
           {isHost && isActive && (
             <div style={{ textAlign: 'center', marginTop: 8 }}>
               <button onClick={handleEndEarly}
@@ -647,6 +649,3 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
     </div>
   );
 }
-
-
-
