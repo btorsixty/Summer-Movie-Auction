@@ -151,7 +151,7 @@ export default function AuctionNight({ room, players, currentPlayer, isHost, mov
       const remaining = Math.max(0, Math.ceil(STARTING_TIME - elapsed));
       setTimeLeft(remaining);
 
-      if (remaining <= 0 && !hasEnded && isHost) {
+      if (remaining <= -2 && !hasEnded && isHost) {
         hasEnded = true;
         clearInterval(timerRef.current);
 
