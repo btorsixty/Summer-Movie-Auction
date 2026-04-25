@@ -162,6 +162,7 @@ export default function AuctionNight(props) {
 
     timerRef.current = setInterval(function() {
       var msLeft = expiryRef.current - Date.now();
+      console.log('TICK expiry:', expiryRef.current, 'now:', Date.now(), 'msLeft:', msLeft);
       var secs = Math.max(0, Math.ceil(msLeft / 1000));
       secs = Math.min(secs, STARTING_TIME);
       setTimeLeft(secs);
