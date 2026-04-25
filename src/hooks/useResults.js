@@ -10,14 +10,45 @@ export function useResults(roomId) {
   const fetchResults = useCallback(async () => {
     if (!roomId) return;
 
-    const { data } = await supabase
+    // Fetch results without joins to avoid 406 errors
+    const { data: rawResults } = await supabase
       .from('results')
-      .select('*, movies(title, release_date, domestic_gross, mojo_slug), players(name, color, studio)')
+      .select('*')
       .eq('room_id', roomId)
       .eq('status', 'active')
       .order('created_at');
 
-    setResults(data || []);
+    if (!rawResults || rawResults.length === 0) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+
+    // Fetch movie and player data separately
+    const movieIds = [...new Set(rawResults.map(r => r.movie_id).filter(Boolean))];
+    const playerIds = [...new Set(rawResults.map(r => r.player_id).filter(Boolean))];
+
+    const [moviesRes, playersRes] = await Promise.all([
+      movieIds.length > 0
+        ? supabase.from('movies').select('id, title, release_date, domestic_gross, mojo_slug').in('id', movieIds)
+        : { data: [] },
+      playerIds.length > 0
+        ? supabase.from('players').select('id, name, color, studio').in('id', playerIds)
+        : { data: [] },
+    ]);
+
+    const moviesMap = {};
+    (moviesRes.data || []).forEach(m => { moviesMap[m.id] = m; });
+    const playersMap = {};
+    (playersRes.data || []).forEach(p => { playersMap[p.id] = p; });
+
+    const enriched = rawResults.map(r => ({
+      ...r,
+      movies: moviesMap[r.movie_id] || null,
+      players: playersMap[r.player_id] || null,
+    }));
+
+    setResults(enriched);
     setLoading(false);
   }, [roomId]);
 

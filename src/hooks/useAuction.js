@@ -126,6 +126,7 @@ export function useAuction(roomId, isHost) {
   }, [auction?.id]);
 
   // Polling fallback: refetch auction + bids every 800ms
+  // Only polls for waiting/active — finished auctions are handled by AuctionNight
   useEffect(() => {
     if (!roomId) return;
 
@@ -134,7 +135,7 @@ export function useAuction(roomId, isHost) {
         .from('auctions')
         .select('*')
         .eq('room_id', roomId)
-        .in('status', ['waiting', 'active', 'sold', 'no_sale'])
+        .in('status', ['waiting', 'active'])
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
@@ -148,11 +149,6 @@ export function useAuction(roomId, isHost) {
         setAuction(withMovie);
       } else {
         setAuction(p => ({ ...p, ...aData, movies: p?.movies }));
-      }
-
-      if (aData.status === 'sold' && prev && prev.status === 'active') {
-        setShowSold(true);
-        setTimeout(() => setShowSold(false), 2500);
       }
 
       if (aData.id) {
