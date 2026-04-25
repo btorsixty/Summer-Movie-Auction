@@ -176,6 +176,8 @@ export default function AuctionNight(props) {
     if (!isHost) return;
     if (!localAuction || localAuction.status !== 'active') return;
     if (timeLeft > 0) return;
+    var msLeft = expiryRef.current - Date.now();
+    if (msLeft > 0) return;
     if (hasEndedRef.current) return;
 
     var aid = localAuction.id;
