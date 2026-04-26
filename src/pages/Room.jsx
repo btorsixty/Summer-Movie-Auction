@@ -8,6 +8,7 @@ import { clearStoredRoom } from '../lib/utils';
 import MarqueeHeader from '../components/MarqueeHeader';
 import Lobby from '../components/Lobby';
 import AuctionNight from '../components/AuctionNight';
+import Roster from '../components/Roster';
 
 export default function Room() {
   const { roomCode } = useParams();
@@ -140,6 +141,7 @@ export default function Room() {
   }
 
   const tabs = [
+    { id: 'roster', label: 'Home' },
     { id: 'lobby', label: 'Lobby' },
     { id: 'auction', label: 'Auction Night', highlight: true },
   ];
@@ -212,6 +214,15 @@ export default function Room() {
       </div>
 
       <div style={{ maxWidth: 1000, margin: '0 auto', padding: '0 20px 40px' }}>
+        {activeTab === 'roster' && (
+          <Roster
+            room={room}
+            players={players}
+            results={results}
+            movies={movies}
+          />
+        )}
+
         {activeTab === 'lobby' && (
           <Lobby
             room={room}
