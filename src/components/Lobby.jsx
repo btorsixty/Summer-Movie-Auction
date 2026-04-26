@@ -20,16 +20,26 @@ export default function Lobby({
 
   const handleAddMovie = async () => {
     if (!newTitle.trim() || !newRelease) return;
-    let slug = null;
-    if (newMojoUrl.trim()) {
-      const match = newMojoUrl.match(/release\/(rl\d+)/);
-      slug = match ? match[1] : newMojoUrl.trim();
-    }
+    // Store whatever the user pastes — full URL or raw ID
+    const slug = newMojoUrl.trim() || null;
     await onAddMovie(newTitle, newRelease, slug);
     setNewTitle('');
     setNewRelease('');
     setNewMojoUrl('');
     setShowAddMovie(false);
+  };
+
+  // Build a smart link from the mojo_slug field
+  const getMovieLink = (slug) => {
+    if (!slug) return null;
+    // If it's already a full URL, use it directly
+    if (slug.startsWith('http')) return slug;
+    // If it's a tt ID, link to IMDb
+    if (slug.match(/^tt\d+$/)) return 'https://www.imdb.com/title/' + slug + '/';
+    // If it's a Mojo release ID (rl...), link to Mojo
+    if (slug.match(/^rl\d+$/)) return 'https://www.boxofficemojo.com/release/' + slug + '/';
+    // Otherwise just return as-is
+    return slug;
   };
 
   const playerSpent = (playerId) => {
@@ -307,77 +317,76 @@ export default function Lobby({
               : 'Host has not added movies yet'}
           </div>
         ) : (
-          movies.map((m) => (
-            <div
-              key={m.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '10px 20px',
-                borderBottom: '1px solid #1a1410',
-              }}
-            >
-              <div style={{ flex: 1 }}>
-                <div
-                  style={{ fontWeight: 600, color: '#e8d5b7', fontSize: 13 }}
-                >
-                  {m.mojo_slug ? (
-                    <a
-                      href={
-                        'https://www.boxofficemojo.com/release/' +
-                        m.mojo_slug +
-                        '/'
-                      }
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        color: '#e8d5b7',
-                        textDecoration: 'none',
-                        borderBottom: '1px dotted #6a5f55',
-                      }}
-                    >
-                      {m.title}
-                    </a>
-                  ) : (
-                    m.title
-                  )}
+          movies.map((m) => {
+            const link = getMovieLink(m.mojo_slug);
+            return (
+              <div
+                key={m.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '10px 20px',
+                  borderBottom: '1px solid #1a1410',
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{ fontWeight: 600, color: '#e8d5b7', fontSize: 13 }}
+                  >
+                    {link ? (
+                      <a
+                        href={link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          color: '#e8d5b7',
+                          textDecoration: 'none',
+                          borderBottom: '1px dotted #6a5f55',
+                        }}
+                      >
+                        {m.title}
+                      </a>
+                    ) : (
+                      m.title
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#8a7f75' }}>
+                    {'Releases ' +
+                      new Date(m.release_date).toLocaleDateString('en-US', {
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                  </div>
                 </div>
-                <div style={{ fontSize: 11, color: '#8a7f75' }}>
-                  {'Releases ' +
-                    new Date(m.release_date).toLocaleDateString('en-US', {
-                      month: 'long',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                </div>
+                {isHost && (
+                  <button
+                    onClick={() => onRemoveMovie(m.id)}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid #2a1f15',
+                      borderRadius: 4,
+                      color: '#3a3025',
+                      fontSize: 10,
+                      padding: '3px 8px',
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = '#e63946';
+                      e.currentTarget.style.color = '#e63946';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = '#2a1f15';
+                      e.currentTarget.style.color = '#3a3025';
+                    }}
+                  >
+                    REMOVE
+                  </button>
+                )}
               </div>
-              {isHost && (
-                <button
-                  onClick={() => onRemoveMovie(m.id)}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid #2a1f15',
-                    borderRadius: 4,
-                    color: '#3a3025',
-                    fontSize: 10,
-                    padding: '3px 8px',
-                    cursor: 'pointer',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = '#e63946';
-                    e.currentTarget.style.color = '#e63946';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = '#2a1f15';
-                    e.currentTarget.style.color = '#3a3025';
-                  }}
-                >
-                  REMOVE
-                </button>
-              )}
-            </div>
-          ))
+            );
+          })
         )}
         {movies.length > 0 && (
           <div style={{ padding: '8px 20px', fontSize: 11, color: '#3a3025' }}>
@@ -498,13 +507,13 @@ export default function Lobby({
                         marginBottom: 4,
                       }}
                     >
-                      Box Office Mojo URL (optional)
+                      IMDb Link (optional)
                     </label>
                     <input
                       type="text"
                       value={newMojoUrl}
                       onChange={(e) => setNewMojoUrl(e.target.value)}
-                      placeholder="https://www.boxofficemojo.com/release/rl..."
+                      placeholder="https://www.imdb.com/title/tt..."
                       style={inputStyle}
                       onFocus={(e) => (e.target.style.borderColor = '#c9a227')}
                       onBlur={(e) => (e.target.style.borderColor = '#3a3025')}
