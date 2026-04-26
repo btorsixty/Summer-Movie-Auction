@@ -10,6 +10,7 @@ import Lobby from '../components/Lobby';
 import AuctionNight from '../components/AuctionNight';
 import Roster from '../components/Roster';
 import Rules from '../components/Rules';
+import Awards from '../components/Awards';
 
 export default function Room() {
   const { roomCode } = useParams();
@@ -17,17 +18,9 @@ export default function Room() {
   const [activeTab, setActiveTab] = useState('lobby');
 
   const {
-    room,
-    players,
-    currentPlayer,
-    isHost,
-    loading,
-    error,
-    setError,
-    joinRoom,
-    setConnected,
-    toggleLock,
-    removePlayer,
+    room, players, currentPlayer, isHost,
+    loading, error, setError,
+    joinRoom, setConnected, toggleLock, removePlayer,
   } = useRoom(roomCode);
 
   const { movies, addMovie, removeMovie } = useMovies(room?.id);
@@ -91,6 +84,7 @@ export default function Room() {
     { id: 'lobby', label: 'Lobby' },
     { id: 'auction', label: 'Auction Night', highlight: true },
     { id: 'rules', label: 'Rules' },
+    { id: 'awards', label: 'Awards' },
   ];
 
   const standings = getStandings(players);
@@ -152,6 +146,10 @@ export default function Room() {
 
         {activeTab === 'rules' && (
           <Rules />
+        )}
+
+        {activeTab === 'awards' && (
+          <Awards players={players} results={results} movies={movies} />
         )}
       </div>
     </div>
