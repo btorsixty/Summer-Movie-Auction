@@ -58,12 +58,31 @@ export function useRoom(roomCode) {
     fetchRoom();
   }, [fetchRoom]);
 
-  // Poll every 2 seconds for player and room updates
+  // Poll every 2 seconds for player updates
   useEffect(() => {
     if (!roomCode) return;
     pollRef.current = setInterval(fetchRoom, 2000);
     return () => clearInterval(pollRef.current);
   }, [roomCode, fetchRoom]);
+
+  // Real-time subscription for players
+  useEffect(() => {
+    if (!room) return;
+
+    const channel = supabase
+      .channel('players-' + room.id)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'players',
+        filter: 'room_id=eq.' + room.id,
+      }, () => {
+        fetchRoom();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [room?.id, fetchRoom]);
 
   // Create a new room
   const createRoom = useCallback(async (pin) => {
