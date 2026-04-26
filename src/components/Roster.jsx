@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { taxedDomestic } from '../lib/utils';
 
 var OMDB_KEY = 'f26360dc';
 var SEASON_START = '2026-05-01';
@@ -148,11 +149,21 @@ function EarningsChart({ weeklyData, players }) {
             <g key={p.id}>
               <path d={pathD} fill="none" stroke={p.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 0 4px ' + p.color + '40)' }} />
               <circle cx={lx} cy={ly} r="4" fill={p.color} stroke="#0d0a07" strokeWidth="2" />
-              <text x={lx + 8} y={ly + 4} fill={p.color} fontSize="10" fontWeight="700" fontFamily="'Lato', sans-serif">{p.name}</text>
             </g>
           );
         })}
       </svg>
+      {/* Legend below chart */}
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap', marginTop: 12 }}>
+        {players.map(function(p) {
+          return (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 12, height: 3, borderRadius: 2, background: p.color }} />
+              <span style={{ fontSize: 11, color: p.color, fontWeight: 600 }}>{p.name}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -267,12 +278,13 @@ export default function Roster({ room, players, results, movies }) {
         var omdb = omdbCache[r.movie_id]; var gross = 0;
         if (omdb && omdb.BoxOffice && omdb.BoxOffice !== 'N/A') gross = parseInt(omdb.BoxOffice.replace(/[$,]/g, ''), 10) || 0;
         else if (md.domestic_gross) gross = md.domestic_gross;
-        return { id: r.movie_id, title: md.title || 'Unknown', release_date: md.release_date, mojo_slug: md.mojo_slug || null, bid: r.bid_amount, gross: gross, roi: r.bid_amount > 0 ? gross / r.bid_amount : 0, poster: omdb ? omdb.Poster : null, omdb: omdb };
+        return { id: r.movie_id, title: md.title || 'Unknown', release_date: md.release_date, mojo_slug: md.mojo_slug || null, bid: r.bid_amount, gross: gross, taxedGross: taxedDomestic(gross), roi: r.bid_amount > 0 ? gross / r.bid_amount : 0, poster: omdb ? omdb.Poster : null, omdb: omdb };
       }).sort(function(a, b) { return new Date(a.release_date) - new Date(b.release_date); });
       var ts = ml.reduce(function(s, m) { return s + m.bid; }, 0);
       var tg = ml.reduce(function(s, m) { return s + m.gross; }, 0);
-      return { player: p, movies: ml, totalSpent: ts, totalGross: tg };
-    }).sort(function(a, b) { return b.totalGross - a.totalGross; });
+      var ttg = ml.reduce(function(s, m) { return s + m.taxedGross; }, 0);
+      return { player: p, movies: ml, totalSpent: ts, totalGross: tg, totalTaxedGross: ttg };
+    }).sort(function(a, b) { return b.totalTaxedGross - a.totalTaxedGross; });
   }, [players, results, movies, omdbCache]);
 
   var nowPlayingMovies = useMemo(function() {
@@ -361,8 +373,8 @@ export default function Roster({ room, players, results, movies }) {
                   <div style={{ fontSize: 11, color: pr.player.color, fontWeight: 600 }}>{pr.player.name + ' • ' + pr.movies.length + ' movie' + (pr.movies.length !== 1 ? 's' : '')}</div>
                 </div>
                 <div style={{ textAlign: 'right', marginRight: 8 }}>
-                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 22, color: '#c9a227' }}>{fmt(pr.totalGross)}</div>
-                  <div style={{ fontSize: 10, color: '#6a5f55' }}>{'$' + pr.totalSpent + ' spent'}</div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 22, color: '#c9a227' }}>{fmt(pr.totalTaxedGross)}</div>
+                  <div style={{ fontSize: 10, color: '#6a5f55' }}>{'$' + pr.totalSpent + ' spent' + (pr.totalGross !== pr.totalTaxedGross ? ' • Raw: ' + fmt(pr.totalGross) : '')}</div>
                 </div>
                 <div style={{ color: '#6a5f55', fontSize: 18, flexShrink: 0, transform: isExp ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>▼</div>
               </div>
@@ -382,7 +394,10 @@ export default function Roster({ room, players, results, movies }) {
                           <div style={{ fontSize: 10, color: '#6a5f55' }}>{new Date(m.release_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{!released && ' • Upcoming'}</div>
                         </div>
                         <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, color: '#8a7f75', minWidth: 40, textAlign: 'center' }}>{'$' + m.bid}</div>
-                        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 14, color: m.gross > 0 ? '#c9a227' : '#3a3025', minWidth: 70, textAlign: 'right' }}>{m.gross > 0 ? fmt(m.gross) : '—'}</div>
+                        <div style={{ textAlign: 'right', minWidth: 70 }}>
+                          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 14, color: m.gross > 0 ? '#c9a227' : '#3a3025' }}>{m.taxedGross > 0 ? fmt(m.taxedGross) : (m.gross > 0 ? fmt(m.gross) : '—')}</div>
+                          {m.gross > 0 && m.taxedGross < m.gross && <div style={{ fontSize: 9, color: '#6a5f55' }}>{'Raw: ' + fmt(m.gross)}</div>}
+                        </div>
                       </div>
                     );
                   })}
