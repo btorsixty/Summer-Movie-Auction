@@ -113,7 +113,7 @@ export function useRoom(roomCode) {
   }, []);
 
   // Join a room as a player
-  const joinRoom = useCallback(async (name, studio) => {
+  const joinRoom = useCallback(async (name, studio, pin) => {
     if (!room) return null;
 
     if (room.is_locked) {
@@ -125,6 +125,11 @@ export function useRoom(roomCode) {
     const usedColors = players.map(p => p.color);
     const color = getNextColor(usedColors);
 
+    let pinHash = null;
+    if (pin) {
+      pinHash = await hashPin(pin);
+    }
+
     const { data, error: err } = await supabase
       .from('players')
       .insert({
@@ -134,6 +139,7 @@ export function useRoom(roomCode) {
         color,
         browser_token: token,
         is_connected: true,
+        pin_hash: pinHash,
       })
       .select()
       .single();

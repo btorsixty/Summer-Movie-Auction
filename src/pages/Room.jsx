@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 import { useRoom } from '../hooks/useRoom';
 import { useMovies } from '../hooks/useMovies';
 import { useAuction } from '../hooks/useAuction';
 import { useResults } from '../hooks/useResults';
-import { clearStoredRoom } from '../lib/utils';
+import { clearStoredRoom, getPlayerToken, setStoredRoom, setStoredPlayerId, hashPin } from '../lib/utils';
 import MarqueeHeader from '../components/MarqueeHeader';
 import Lobby from '../components/Lobby';
 import AuctionNight from '../components/AuctionNight';
@@ -157,14 +158,48 @@ export default function Room() {
 }
 
 function JoinPrompt({ room, onJoin, error }) {
+  const [joinMode, setJoinMode] = useState('new'); // 'new' | 'rejoin'
   const [name, setName] = useState('');
   const [studio, setStudio] = useState('');
+  const [pin, setPin] = useState('');
+  const [rejoinName, setRejoinName] = useState('');
+  const [rejoinPin, setRejoinPin] = useState('');
   const [loading, setLoading] = useState(false);
+  const [localError, setLocalError] = useState('');
 
-  const handleSubmit = async () => {
-    setLoading(true);
-    await onJoin(name, studio);
+  const handleNewJoin = async () => {
+    if (!pin || pin.length < 4) { setLocalError('Set a 4+ character PIN for rejoining later'); return; }
+    setLoading(true); setLocalError('');
+    await onJoin(name, studio, pin);
     setLoading(false);
+  };
+
+  const handleRejoin = async () => {
+    if (!rejoinName.trim()) { setLocalError('Enter your name'); return; }
+    if (!rejoinPin) { setLocalError('Enter your PIN'); return; }
+    setLoading(true); setLocalError('');
+    try {
+      const pinHash = await hashPin(rejoinPin);
+      const { data: players } = await supabase
+        .from('players').select('*')
+        .eq('room_id', room.id)
+        .ilike('name', rejoinName.trim())
+        .eq('is_removed', false);
+
+      if (!players || players.length === 0) throw new Error('No player with that name found');
+      const player = players.find(p => p.pin_hash === pinHash);
+      if (!player) throw new Error('Incorrect PIN');
+
+      await supabase.from('players').update({
+        browser_token: getPlayerToken(),
+        is_connected: true,
+      }).eq('id', player.id);
+
+      setStoredRoom(room.code);
+      setStoredPlayerId(player.id);
+      window.location.reload();
+    } catch (err) { setLocalError(err.message); }
+    finally { setLoading(false); }
   };
 
   const inputStyle = {
@@ -173,42 +208,116 @@ function JoinPrompt({ room, onJoin, error }) {
     width: '100%', boxSizing: 'border-box', outline: 'none',
   };
 
+  const displayError = localError || error;
+
   return (
     <div style={{ maxWidth: 400, margin: '0 auto', padding: '40px 20px' }}>
-      <div style={{ background: 'linear-gradient(135deg, #1a1410, #2a1f15)', border: '1px solid #3a3025', borderRadius: 12, padding: 24 }}>
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: '#c9a227', letterSpacing: 2, marginBottom: 20, textAlign: 'center' }}>
-          JOIN THE AUCTION
-        </div>
-        {room.is_locked && (
-          <div style={{ color: '#e63946', fontSize: 13, textAlign: 'center', marginBottom: 12 }}>
-            This room is locked. No new players can join.
-          </div>
+      {/* Toggle tabs */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 0 }}>
+        <button onClick={() => { setJoinMode('new'); setLocalError(''); }}
+          style={{
+            flex: 1, padding: '10px', borderRadius: '8px 8px 0 0', cursor: 'pointer',
+            background: joinMode === 'new' ? 'linear-gradient(135deg, #1a1410, #2a1f15)' : 'transparent',
+            border: joinMode === 'new' ? '1px solid #c9a227' : '1px solid #2a1f15',
+            borderBottom: 'none', fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 700,
+            color: joinMode === 'new' ? '#c9a227' : '#6a5f55', letterSpacing: 2,
+          }}>
+          NEW PLAYER
+        </button>
+        <button onClick={() => { setJoinMode('rejoin'); setLocalError(''); }}
+          style={{
+            flex: 1, padding: '10px', borderRadius: '8px 8px 0 0', cursor: 'pointer',
+            background: joinMode === 'rejoin' ? 'linear-gradient(135deg, #1a1410, #2a1f15)' : 'transparent',
+            border: joinMode === 'rejoin' ? '1px solid #2a9d8f' : '1px solid #2a1f15',
+            borderBottom: 'none', fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 700,
+            color: joinMode === 'rejoin' ? '#2a9d8f' : '#6a5f55', letterSpacing: 2,
+          }}>
+          REJOIN
+        </button>
+      </div>
+
+      <div style={{
+        background: 'linear-gradient(135deg, #1a1410, #2a1f15)',
+        border: '1px solid ' + (joinMode === 'rejoin' ? '#2a9d8f' : '#3a3025'),
+        borderRadius: '0 0 12px 12px', padding: 24,
+      }}>
+        {/* New player form */}
+        {joinMode === 'new' && (
+          <>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: '#c9a227', letterSpacing: 2, marginBottom: 20, textAlign: 'center' }}>
+              JOIN THE AUCTION
+            </div>
+            {room.is_locked ? (
+              <div style={{ color: '#e63946', fontSize: 13, textAlign: 'center' }}>This room is locked. No new players can join.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div>
+                  <label style={{ fontSize: 10, color: '#6a5f55', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Your Name *</label>
+                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter your name" style={inputStyle}
+                    onFocus={(e) => (e.target.style.borderColor = '#c9a227')} onBlur={(e) => (e.target.style.borderColor = '#3a3025')} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: '#6a5f55', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Studio Name</label>
+                  <input type="text" value={studio} onChange={(e) => setStudio(e.target.value)} placeholder="e.g. Wild Card Pictures" style={inputStyle}
+                    onFocus={(e) => (e.target.style.borderColor = '#c9a227')} onBlur={(e) => (e.target.style.borderColor = '#3a3025')} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: '#6a5f55', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Set Your PIN * (to rejoin later)</label>
+                  <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="4+ characters" style={inputStyle}
+                    onFocus={(e) => (e.target.style.borderColor = '#c9a227')} onBlur={(e) => (e.target.style.borderColor = '#3a3025')} />
+                  <div style={{ fontSize: 10, color: '#3a3025', marginTop: 4 }}>Remember this — you'll need it to rejoin from another device</div>
+                </div>
+                {displayError && <div style={{ color: '#e63946', fontSize: 13, textAlign: 'center' }}>{displayError}</div>}
+                <button onClick={handleNewJoin} disabled={loading || !name.trim()}
+                  style={{
+                    padding: '14px',
+                    background: name.trim() ? 'linear-gradient(135deg, #c9a227, #f4d03f)' : '#2a1f15',
+                    border: 'none', borderRadius: 8,
+                    cursor: name.trim() ? 'pointer' : 'not-allowed',
+                    fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700,
+                    color: name.trim() ? '#0d0a07' : '#6a5f55', letterSpacing: 2,
+                  }}>
+                  {loading ? 'JOINING...' : 'JOIN'}
+                </button>
+              </div>
+            )}
+          </>
         )}
-        {!room.is_locked && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div>
-              <label style={{ fontSize: 10, color: '#6a5f55', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Your Name *</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter your name" style={inputStyle}
-                onFocus={(e) => (e.target.style.borderColor = '#c9a227')} onBlur={(e) => (e.target.style.borderColor = '#3a3025')} />
+
+        {/* Rejoin form */}
+        {joinMode === 'rejoin' && (
+          <>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: '#2a9d8f', letterSpacing: 2, marginBottom: 8, textAlign: 'center' }}>
+              REJOIN MY STUDIO
             </div>
-            <div>
-              <label style={{ fontSize: 10, color: '#6a5f55', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Studio Name</label>
-              <input type="text" value={studio} onChange={(e) => setStudio(e.target.value)} placeholder="e.g. Wild Card Pictures" style={inputStyle}
-                onFocus={(e) => (e.target.style.borderColor = '#c9a227')} onBlur={(e) => (e.target.style.borderColor = '#3a3025')} />
+            <div style={{ fontSize: 12, color: '#6a5f55', textAlign: 'center', marginBottom: 16 }}>
+              Enter your name and PIN to reconnect
             </div>
-            {error && <div style={{ color: '#e63946', fontSize: 13, textAlign: 'center' }}>{error}</div>}
-            <button onClick={handleSubmit} disabled={loading || !name.trim()}
-              style={{
-                padding: '14px',
-                background: name.trim() ? 'linear-gradient(135deg, #c9a227, #f4d03f)' : '#2a1f15',
-                border: 'none', borderRadius: 8,
-                cursor: name.trim() ? 'pointer' : 'not-allowed',
-                fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700,
-                color: name.trim() ? '#0d0a07' : '#6a5f55', letterSpacing: 2,
-              }}>
-              {loading ? 'JOINING...' : 'JOIN'}
-            </button>
-          </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 10, color: '#6a5f55', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Your Name *</label>
+                <input type="text" value={rejoinName} onChange={(e) => setRejoinName(e.target.value)} placeholder="Exactly as you entered it" style={inputStyle}
+                  onFocus={(e) => (e.target.style.borderColor = '#2a9d8f')} onBlur={(e) => (e.target.style.borderColor = '#3a3025')} />
+              </div>
+              <div>
+                <label style={{ fontSize: 10, color: '#6a5f55', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Your PIN *</label>
+                <input type="password" value={rejoinPin} onChange={(e) => setRejoinPin(e.target.value)} placeholder="The PIN you set when joining" style={inputStyle}
+                  onFocus={(e) => (e.target.style.borderColor = '#2a9d8f')} onBlur={(e) => (e.target.style.borderColor = '#3a3025')} />
+              </div>
+              {displayError && <div style={{ color: '#e63946', fontSize: 13, textAlign: 'center' }}>{displayError}</div>}
+              <button onClick={handleRejoin} disabled={loading || !rejoinName.trim()}
+                style={{
+                  padding: '14px',
+                  background: rejoinName.trim() ? 'linear-gradient(135deg, #2a9d8f, #3dccbb)' : '#2a1f15',
+                  border: 'none', borderRadius: 8,
+                  cursor: rejoinName.trim() ? 'pointer' : 'not-allowed',
+                  fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700,
+                  color: rejoinName.trim() ? '#0d0a07' : '#6a5f55', letterSpacing: 2,
+                }}>
+                {loading ? 'RECONNECTING...' : 'REJOIN'}
+              </button>
+            </div>
+          </>
         )}
       </div>
     </div>
