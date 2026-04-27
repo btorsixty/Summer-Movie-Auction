@@ -219,6 +219,21 @@ export default function Rules() {
           </div>
         </div>
   
+        {/* ─── KEEP YOUR STUBS ────────────────────────────── */}
+        <div style={{ ...sectionStyle, border: '1px solid #2a9d8f' }}>
+          <div style={{ ...headerStyle, borderBottomColor: '#2a9d8f', background: 'linear-gradient(135deg, #2a9d8f15, transparent)' }}>
+            🎟️ Keep Your Stubs!
+          </div>
+          <div style={bodyStyle}>
+            <p style={{ margin: '0 0 12px' }}>
+              If you go see one of your own movies in theaters, <span style={accentText()}>keep your ticket stub</span>. At the end of the season, stubs will be collected for a secret bonus.
+            </p>
+            <p style={{ margin: 0, color: '#2a9d8f', fontWeight: 600, fontStyle: 'italic' }}>
+              That's all we're saying for now. Don't throw them away.
+            </p>
+          </div>
+        </div>
+  
         {/* ─── THE WINNER ──────────────────────────────────── */}
         <div style={sectionStyle}>
           <div style={headerStyle}>The Winner</div>
