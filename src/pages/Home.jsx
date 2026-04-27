@@ -26,14 +26,13 @@ export default function Home() {
 
   // ─── HOST ─────────────────────────────────────────────────
   const handleHost = async () => {
-    if (!hostPin || hostPin.length < 4) { setError('PIN must be at least 4 characters'); return; }
+    if (!playerPin || playerPin.length < 4) { setError('PIN must be at least 4 characters'); return; }
     if (!playerName.trim()) { setError('Enter your name'); return; }
     setLoading(true); setError('');
     try {
       const hostToken = crypto.randomUUID();
       const code = generateRoomCode();
-      const pinHash = await hashPin(hostPin);
-      const playerPinHash = await hashPin(playerPin || hostPin);
+      const pinHash = await hashPin(playerPin);
 
       const { data: room, error: roomErr } = await supabase
         .from('rooms').insert({ code, host_token: hostToken, host_pin_hash: pinHash }).select().single();
@@ -44,7 +43,7 @@ export default function Home() {
           room_id: room.id, name: playerName.trim(),
           studio: studioName.trim() || null, color: '#e63946',
           browser_token: getPlayerToken(), is_connected: true,
-          pin_hash: playerPinHash, is_host: true,
+          pin_hash: pinHash, is_host: true,
         }).select().single();
       if (playerErr) throw playerErr;
 
@@ -227,13 +226,7 @@ export default function Home() {
                   onFocus={e => e.target.style.borderColor = '#c9a227'} onBlur={e => e.target.style.borderColor = '#3a3025'} />
               </div>
               <div>
-                <label style={{ fontSize: 10, color: '#6a5f55', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Host PIN * (to manage the room)</label>
-                <input type="password" value={hostPin} onChange={e => setHostPin(e.target.value)}
-                  placeholder="4+ characters" style={inputStyle}
-                  onFocus={e => e.target.style.borderColor = '#c9a227'} onBlur={e => e.target.style.borderColor = '#3a3025'} />
-              </div>
-              <div>
-                <label style={{ fontSize: 10, color: '#6a5f55', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Your Player PIN * (to rejoin later)</label>
+                <label style={{ fontSize: 10, color: '#6a5f55', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Your PIN * (to rejoin later)</label>
                 <input type="password" value={playerPin} onChange={e => setPlayerPin(e.target.value)}
                   placeholder="4+ characters" style={inputStyle}
                   onFocus={e => e.target.style.borderColor = '#c9a227'} onBlur={e => e.target.style.borderColor = '#3a3025'} />
