@@ -5,7 +5,7 @@ import { useRoom } from '../hooks/useRoom';
 import { useMovies } from '../hooks/useMovies';
 import { useAuction } from '../hooks/useAuction';
 import { useResults } from '../hooks/useResults';
-import { clearStoredRoom, getPlayerToken, setStoredRoom, setStoredPlayerId, hashPin } from '../lib/utils';
+import { clearStoredRoom, getPlayerToken, setStoredRoom, setStoredPlayerId, setHostToken, hashPin } from '../lib/utils';
 import MarqueeHeader from '../components/MarqueeHeader';
 import Lobby from '../components/Lobby';
 import AuctionNight from '../components/AuctionNight';
@@ -194,6 +194,11 @@ function JoinPrompt({ room, onJoin, error }) {
         browser_token: getPlayerToken(),
         is_connected: true,
       }).eq('id', player.id);
+
+      // Restore host privileges if this player is the host
+      if (player.is_host) {
+        setHostToken(room.host_token);
+      }
 
       setStoredRoom(room.code);
       setStoredPlayerId(player.id);

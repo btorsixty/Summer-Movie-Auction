@@ -32,7 +32,6 @@ export function useRoom(roomCode) {
     }
 
     setRoom(roomData);
-    setIsHost(roomData.host_token === getHostToken());
 
     const { data: playerData } = await supabase
       .from('players')
@@ -49,6 +48,16 @@ export function useRoom(roomCode) {
     if (existing) {
       setCurrentPlayer(existing);
       setStoredPlayerId(existing.id);
+
+      // Restore host privileges if this player is the host
+      if (existing.is_host) {
+        setHostToken(roomData.host_token);
+        setIsHost(true);
+      } else {
+        setIsHost(roomData.host_token === getHostToken());
+      }
+    } else {
+      setIsHost(roomData.host_token === getHostToken());
     }
 
     setLoading(false);

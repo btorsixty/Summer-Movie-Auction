@@ -44,7 +44,7 @@ export default function Home() {
           room_id: room.id, name: playerName.trim(),
           studio: studioName.trim() || null, color: '#e63946',
           browser_token: getPlayerToken(), is_connected: true,
-          pin_hash: playerPinHash,
+          pin_hash: playerPinHash, is_host: true,
         }).select().single();
       if (playerErr) throw playerErr;
 
@@ -124,6 +124,11 @@ export default function Home() {
         browser_token: getPlayerToken(),
         is_connected: true,
       }).eq('id', player.id);
+
+      // Restore host privileges if this player is the host
+      if (player.is_host) {
+        setHostToken(room.host_token);
+      }
 
       setStoredRoom(room.code);
       setStoredPlayerId(player.id);
