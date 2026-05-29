@@ -241,33 +241,41 @@ export default function Roster({ room, players, results, movies }) {
     var mon = new Date(now); mon.setDate(now.getDate() + diff);
     var weekStart = mon.toISOString().split('T')[0];
 
-    var rows = results.map(function(r) {
-      var omdb = omdbCache[r.movie_id]; var gross = 0;
-      if (omdb && omdb.BoxOffice && omdb.BoxOffice !== 'N/A') gross = parseInt(omdb.BoxOffice.replace(/[$,]/g, ''), 10) || 0;
-      else if (r.movies && r.movies.domestic_gross) gross = r.movies.domestic_gross;
-      return { room_id: room.id, movie_id: r.movie_id, player_id: r.player_id, week_start: weekStart, cumulative_gross: gross };
-    });
+    // Fetch FRESH domestic_gross straight from the movies table (where the
+    // weekly scraper writes). The OMDB cache has no box office data, so we
+    // can't rely on it — the movies table is the source of truth.
+    var movieIds = results.map(function(r) { return r.movie_id; });
 
-    var p = rows.length > 0
-      ? supabase.from('weekly_grosses').upsert(rows, { onConflict: 'room_id,movie_id,week_start' }).select().then(function(r) { if (r.error) console.error('Snapshot err:', r.error.message); })
-      : Promise.resolve();
+    supabase.from('movies').select('id, domestic_gross').in('id', movieIds).then(function(mres) {
+      var grossMap = {};
+      (mres.data || []).forEach(function(m) { grossMap[m.id] = m.domestic_gross || 0; });
 
-    p.then(function() {
-      return supabase.from('weekly_grosses').select('*').eq('room_id', room.id).order('week_start');
-    }).then(function(res) {
-      if (res.data && res.data.length > 0) {
-        var weeks = [], wm = {};
-        res.data.forEach(function(row) {
-          if (!wm[row.week_start]) {
-            wm[row.week_start] = { week_label: new Date(row.week_start + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), players: {} };
-            weeks.push(wm[row.week_start]);
-          }
-          wm[row.week_start].players[row.player_id] = (wm[row.week_start].players[row.player_id] || 0) + row.cumulative_gross;
-        });
-        setWeeklyData(weeks);
-      }
+      var rows = results.map(function(r) {
+        var gross = grossMap[r.movie_id] || 0;
+        return { room_id: room.id, movie_id: r.movie_id, player_id: r.player_id, week_start: weekStart, cumulative_gross: gross };
+      });
+
+      var p = rows.length > 0
+        ? supabase.from('weekly_grosses').upsert(rows, { onConflict: 'room_id,movie_id,week_start' }).select().then(function(r) { if (r.error) console.error('Snapshot err:', r.error.message); })
+        : Promise.resolve();
+
+      p.then(function() {
+        return supabase.from('weekly_grosses').select('*').eq('room_id', room.id).order('week_start');
+      }).then(function(res) {
+        if (res.data && res.data.length > 0) {
+          var weeks = [], wm = {};
+          res.data.forEach(function(row) {
+            if (!wm[row.week_start]) {
+              wm[row.week_start] = { week_label: new Date(row.week_start + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), players: {} };
+              weeks.push(wm[row.week_start]);
+            }
+            wm[row.week_start].players[row.player_id] = (wm[row.week_start].players[row.player_id] || 0) + row.cumulative_gross;
+          });
+          setWeeklyData(weeks);
+        }
+      });
     });
-  }, [room ? room.id : null, loading, omdbCache]);
+  }, [room ? room.id : null, loading]);
 
   // ─── Derived data ─────────────────────────────────────────
   var playerRosters = useMemo(function() {
