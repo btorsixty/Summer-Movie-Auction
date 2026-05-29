@@ -66,50 +66,31 @@ async function scrapeDomesticGross(imdbId) {
 
     let domesticGross = null;
 
-    // ── PRIMARY METHOD ──────────────────────────────────────
-    // The "All Releases" summary box (class mojo-performance-summary-table)
-    // contains the LIFETIME domestic total. Each money figure is wrapped in
-    // a span.money and preceded by a label like "Domestic (76.7%)".
-    // We grab the one whose label starts with "Domestic" and has a percent,
-    // which is the lifetime total — NOT "Domestic Opening".
-    $('.mojo-performance-summary-table .a-section').each((i, el) => {
-      if (domesticGross) return;
-      const block = $(el);
-      const labelText = block.find('.a-size-small').first().text().trim();
-      if (/^Domestic\b/i.test(labelText) && labelText.includes('%')) {
-        const money = block.find('span.money').first().text().trim();
-        const parsed = parseInt(money.replace(/[$,]/g, ''), 10);
-        if (parsed > 0) domesticGross = parsed;
-      }
-    });
+    // Box Office Mojo renders the summary as label/value pairs where the
+    // label "Domestic (NN.N%)" is followed by the lifetime gross. The
+    // "Domestic Opening" figure has NO percentage, so requiring the percent
+    // in the label reliably isolates the lifetime total.
+    //
+    // Collapse the whole page to single-spaced text and regex for the
+    // pattern. This is the most robust approach because BOM splits the
+    // label and value across separate elements inconsistently.
+    const text = $.text().replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
 
-    // ── SECONDARY METHOD ────────────────────────────────────
-    // Walk every span.money and check the label in its parent block.
-    // Accept "Domestic (NN.N%)". Reject anything containing "opening".
-    if (!domesticGross) {
-      $('span.money').each((i, el) => {
-        if (domesticGross) return;
-        const money = $(el).text().trim();
-        const parent = $(el).parent();
-        const label = (parent.find('.a-size-small').first().text().trim()
-          || parent.prev().text().trim());
-        if (/^Domestic\s*\(/i.test(label) && !/opening/i.test(label)) {
-          const parsed = parseInt(money.replace(/[$,]/g, ''), 10);
-          if (parsed > 0) domesticGross = parsed;
-        }
-      });
+    // Match "Domestic (76.7%) $73,524,085" — percent guarantees lifetime total
+    let match = text.match(/Domestic\s*\(\s*[\d.]+\s*%\s*\)\s*\$\s*([\d,]+)/i);
+
+    // Some fully-domestic films show "Domestic (100%)" or occasionally the
+    // worldwide equals domestic. If the percent pattern misses, try matching
+    // "Domestic (–)" style is skipped (no gross). As a final fallback, look
+    // for the summary where Domestic label is immediately followed by a $ value
+    // but is NOT "Domestic Opening" or "Domestic Distributor".
+    if (!match) {
+      match = text.match(/Domestic\s*\(\s*[\d.]+\s*%\s*\)\s*([\d,]+)/i);
     }
 
-    // ── TERTIARY METHOD (regex fallback) ────────────────────
-    // Match "Domestic (NN.N%)" followed by a dollar amount. The required
-    // percent guarantees we never catch the "Domestic Opening" figure.
-    if (!domesticGross) {
-      const fullText = $.text().replace(/\s+/g, ' ');
-      const match = fullText.match(/Domestic\s*\([\d.]+%\)\s*\$?([\d,]+)/i);
-      if (match) {
-        const parsed = parseInt(match[1].replace(/,/g, ''), 10);
-        if (parsed > 0) domesticGross = parsed;
-      }
+    if (match) {
+      const parsed = parseInt(match[1].replace(/,/g, ''), 10);
+      if (parsed > 0) domesticGross = parsed;
     }
 
     return domesticGross;
