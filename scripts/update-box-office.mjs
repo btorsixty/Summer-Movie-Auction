@@ -64,51 +64,51 @@ async function scrapeDomesticGross(imdbId) {
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    // Look for the domestic gross in the performance summary
-    // Box Office Mojo shows it in a span with class "money" inside the summary section
     let domesticGross = null;
 
-    // Method 1: Look for "Domestic" header followed by money value
-    $('span.a-size-small').each((i, el) => {
-      const label = $(el).text().trim();
-      if (label === 'Domestic' || label === 'Domestic (Gross)') {
-        const moneyEl = $(el).closest('.a-section').find('span.money, span.a-size-medium');
-        if (moneyEl.length > 0) {
-          const raw = moneyEl.first().text().trim();
-          const parsed = parseInt(raw.replace(/[$,]/g, ''), 10);
-          if (parsed > 0) domesticGross = parsed;
-        }
+    // ── PRIMARY METHOD ──────────────────────────────────────
+    // The "All Releases" summary box (class mojo-performance-summary-table)
+    // contains the LIFETIME domestic total. Each money figure is wrapped in
+    // a span.money and preceded by a label like "Domestic (76.7%)".
+    // We grab the one whose label starts with "Domestic" and has a percent,
+    // which is the lifetime total — NOT "Domestic Opening".
+    $('.mojo-performance-summary-table .a-section').each((i, el) => {
+      if (domesticGross) return;
+      const block = $(el);
+      const labelText = block.find('.a-size-small').first().text().trim();
+      if (/^Domestic\b/i.test(labelText) && labelText.includes('%')) {
+        const money = block.find('span.money').first().text().trim();
+        const parsed = parseInt(money.replace(/[$,]/g, ''), 10);
+        if (parsed > 0) domesticGross = parsed;
       }
     });
 
-    // Method 2: Look in the summary table for Domestic row
+    // ── SECONDARY METHOD ────────────────────────────────────
+    // Walk every span.money and check the label in its parent block.
+    // Accept "Domestic (NN.N%)". Reject anything containing "opening".
     if (!domesticGross) {
-      $('div.a-section').each((i, section) => {
-        const text = $(section).text();
-        if (text.includes('Domestic') && text.includes('$')) {
-          const moneyMatch = text.match(/Domestic[^$]*\$([\d,]+)/);
-          if (moneyMatch) {
-            const parsed = parseInt(moneyMatch[1].replace(/,/g, ''), 10);
-            if (parsed > 0) domesticGross = parsed;
-          }
+      $('span.money').each((i, el) => {
+        if (domesticGross) return;
+        const money = $(el).text().trim();
+        const parent = $(el).parent();
+        const label = (parent.find('.a-size-small').first().text().trim()
+          || parent.prev().text().trim());
+        if (/^Domestic\s*\(/i.test(label) && !/opening/i.test(label)) {
+          const parsed = parseInt(money.replace(/[$,]/g, ''), 10);
+          if (parsed > 0) domesticGross = parsed;
         }
       });
     }
 
-    // Method 3: Broader search for any domestic gross pattern
+    // ── TERTIARY METHOD (regex fallback) ────────────────────
+    // Match "Domestic (NN.N%)" followed by a dollar amount. The required
+    // percent guarantees we never catch the "Domestic Opening" figure.
     if (!domesticGross) {
-      const fullText = $.text();
-      // Look for "Domestic" near a dollar amount
-      const patterns = [
-        /Domestic\s*(?:\(.*?\))?\s*\$\s*([\d,]+)/i,
-        /Domestic[^$]{0,50}\$([\d,]+)/i,
-      ];
-      for (const pattern of patterns) {
-        const match = fullText.match(pattern);
-        if (match) {
-          const parsed = parseInt(match[1].replace(/,/g, ''), 10);
-          if (parsed > 0) { domesticGross = parsed; break; }
-        }
+      const fullText = $.text().replace(/\s+/g, ' ');
+      const match = fullText.match(/Domestic\s*\([\d.]+%\)\s*\$?([\d,]+)/i);
+      if (match) {
+        const parsed = parseInt(match[1].replace(/,/g, ''), 10);
+        if (parsed > 0) domesticGross = parsed;
       }
     }
 
@@ -183,3 +183,4 @@ main().catch(err => {
   console.error('Fatal error:', err);
   process.exit(1);
 });
+
